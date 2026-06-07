@@ -169,6 +169,27 @@ function parseTotalCount(html) {
   return m ? parseInt(m[1].replace(/,/g, ''), 10) : 0;
 }
 
+// JSESSIONID 쿠키 획득: manual redirect로 302의 set-cookie까지 포착, 실패 시 follow 재시도
+// diag 객체에 진단 정보를 기록한다.
+async function getSplibSessionCookie(lib, diag) {
+  const headers = { 'User-Agent': SPLIB_UA, Accept: 'text/html', 'Accept-Language': 'ko-KR,ko;q=0.9' };
+  for (const mode of ['manual', 'follow']) {
+    try {
+      const r = await fetch(lib.formUrl, { method: 'GET', headers, redirect: mode });
+      if (diag) {
+        diag.sessionStatus = r.status;
+        diag.hasGetSetCookie = typeof r.headers.getSetCookie === 'function';
+        diag.rawSetCookieLen = (r.headers.get('set-cookie') || '').length;
+      }
+      const c = extractSessionCookie(r.headers);
+      if (c) return c;
+    } catch (e) {
+      if (diag) diag.sessionError = e.message;
+    }
+  }
+  return '';
+}
+
 async function fetchSplibPage(lib, title, pageNo, cookie) {
   const params = new URLSearchParams({
     searchType: 'SIMPLE',
@@ -189,24 +210,22 @@ async function fetchSplibPage(lib, title, pageNo, cookie) {
 
   const response = await fetch(lib.searchUrl, { method: 'POST', headers, body: params.toString() });
   const html = await response.text();
-  return { status: response.status, items: parseSearchResults(html), total: parseTotalCount(html) };
+  // POST 응답이 새 세션 쿠키를 줄 수도 있음 (400 재시도용)
+  const respCookie = extractSessionCookie(response.headers);
+  return {
+    status: response.status,
+    items: parseSearchResults(html),
+    total: parseTotalCount(html),
+    respCookie,
+  };
 }
 
 async function handleSplib(source, title, author, publisher, lib, res) {
   const queryStr = `${title} ${author || ''}`.trim();
+  const diag = {};
 
   // Step 1: 검색폼 GET → JSESSIONID 획득 (없으면 검색 POST가 400 반환)
-  let sessionCookie = '';
-  try {
-    const sessionRes = await fetch(lib.formUrl, {
-      method: 'GET',
-      headers: { 'User-Agent': SPLIB_UA, Accept: 'text/html', 'Accept-Language': 'ko-KR,ko;q=0.9' },
-      redirect: 'follow',
-    });
-    sessionCookie = extractSessionCookie(sessionRes.headers);
-  } catch (e) {
-    console.log(`[splib ${source}] session GET failed: ${e.message}`);
-  }
+  let sessionCookie = await getSplibSessionCookie(lib, diag);
 
   // Step 2: 도서관 필터(searchLibraryArr)는 0건을 유발하므로 쓰지 않고,
   // 송파 전 도서관 결과를 페이지별로 받아 도서관명으로 필터링한다.
@@ -215,21 +234,33 @@ async function handleSplib(source, title, author, publisher, lib, res) {
   let total = 0;
   let lastStatus = 0;
   let pagesFetched = 0;
+  let retried = false;
 
   for (let page = 1; page <= SPLIB_MAX_PAGES; page++) {
-    const { status, items, total: t } = await fetchSplibPage(lib, title, page, sessionCookie);
-    lastStatus = status;
-    pagesFetched = page;
-    if (page === 1) total = t;
+    let pageRes = await fetchSplibPage(lib, title, page, sessionCookie);
 
-    for (const it of items) {
+    // 쿠키 없이/만료로 400이 나면, 응답이 준 쿠키로 한 번 재시도
+    if (pageRes.status === 400 && !retried) {
+      retried = true;
+      const freshCookie = pageRes.respCookie || (await getSplibSessionCookie(lib, diag));
+      if (freshCookie) {
+        sessionCookie = freshCookie;
+        pageRes = await fetchSplibPage(lib, title, page, sessionCookie);
+      }
+    }
+
+    lastStatus = pageRes.status;
+    pagesFetched = page;
+    if (page === 1) total = pageRes.total;
+
+    for (const it of pageRes.items) {
       if (it.libraryName && it.libraryName.includes(lib.matchName)) libItems.push(it);
     }
 
     // 대상 도서관 소장본을 찾았으면 조기 종료
     if (libItems.length > 0) break;
     // 더 가져올 페이지가 없으면 종료
-    if (page * SPLIB_PAGE_SIZE >= total || items.length === 0) break;
+    if (page * SPLIB_PAGE_SIZE >= total || pageRes.items.length === 0) break;
   }
 
   console.log(
@@ -254,6 +285,8 @@ async function handleSplib(source, title, author, publisher, lib, res) {
       bestScore,
       status: lastStatus,
       cookieSent: !!sessionCookie,
+      retried,
+      ...diag,
     },
     checkedAt: Math.floor(Date.now() / 1000),
   });
