@@ -1149,6 +1149,17 @@ td input[type="checkbox"] {
 .yammy-desc {
   font-size: var(--font-sm);
   color: var(--color-text-muted);
+  margin-bottom: var(--space-sm);
+}
+
+.yammy-warning {
+  font-size: var(--font-xs);
+  line-height: 1.5;
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+  border: 1px solid rgba(251, 191, 36, 0.28);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
   margin-bottom: var(--space-md);
 }
 
