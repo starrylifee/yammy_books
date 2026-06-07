@@ -217,7 +217,7 @@ async function getSplibSessionCookie(lib, diag) {
   return '';
 }
 
-async function fetchSplibPage(lib, title, pageNo, cookie) {
+async function fetchSplibPage(lib, title, pageNo, cookie, method = 'POST') {
   const params = new URLSearchParams({
     searchType: 'SIMPLE',
     searchCategory: 'BOOK',
@@ -227,15 +227,17 @@ async function fetchSplibPage(lib, title, pageNo, cookie) {
   });
   const headers = {
     'User-Agent': SPLIB_UA,
-    'Content-Type': 'application/x-www-form-urlencoded',
     Origin: new URL(lib.searchUrl).origin,
     Referer: lib.homeUrl || lib.formUrl,
     Accept: 'text/html,application/xhtml+xml,*/*;q=0.9',
     'Accept-Language': 'ko-KR,ko;q=0.9',
   };
+  if (method === 'POST') headers['Content-Type'] = 'application/x-www-form-urlencoded';
   if (cookie) headers['Cookie'] = cookie;
 
-  const response = await fetch(lib.searchUrl, { method: 'POST', headers, body: params.toString() });
+  const url = method === 'GET' ? `${lib.searchUrl}?${params.toString()}` : lib.searchUrl;
+  const init = method === 'POST' ? { method, headers, body: params.toString() } : { method, headers };
+  const response = await fetch(url, init);
   const html = await response.text();
   // POST 응답이 새 세션 쿠키를 줄 수도 있음 (400 재시도용)
   const respCookie = extractSessionCookie(response.headers);
@@ -246,6 +248,7 @@ async function fetchSplibPage(lib, title, pageNo, cookie) {
     respCookie,
     htmlLen: html.length,
     htmlHead: stripTags(html).slice(0, 700),
+    method,
   };
 }
 
@@ -267,9 +270,21 @@ async function handleSplib(source, title, author, publisher, lib, res) {
   let lastHtmlLen = 0;
   let lastHtmlHead = '';
   let lastItems = 0;
+  let lastMethod = 'POST';
 
   for (let page = 1; page <= SPLIB_MAX_PAGES; page++) {
     let pageRes = await fetchSplibPage(lib, title, page, sessionCookie);
+
+    // Vercel 같은 배포 런타임에서 쿠키 획득이 실패하면 POST 검색이 400이 될 수 있다.
+    // 같은 검색을 GET 쿼리스트링으로 보내면 송파 사이트가 세션을 새로 내려주며 HTML을 반환한다.
+    if (pageRes.status === 400) {
+      const getRes = await fetchSplibPage(lib, title, page, '', 'GET');
+      if (getRes.status < 400 || getRes.items.length > pageRes.items.length) {
+        if (getRes.respCookie) sessionCookie = getRes.respCookie;
+        if (diag) diag.usedGetFallback = true;
+        pageRes = getRes;
+      }
+    }
 
     // 쿠키 없이/만료로 400이 나면, 응답이 준 쿠키로 한 번 재시도
     if (pageRes.status === 400 && !retried) {
@@ -285,6 +300,7 @@ async function handleSplib(source, title, author, publisher, lib, res) {
     lastHtmlLen = pageRes.htmlLen;
     lastHtmlHead = pageRes.htmlHead;
     lastItems = pageRes.items.length;
+    lastMethod = pageRes.method;
     pagesFetched = page;
     if (page === 1) total = pageRes.total;
 
@@ -320,6 +336,7 @@ async function handleSplib(source, title, author, publisher, lib, res) {
       items: lastItems,
       htmlLen: lastHtmlLen,
       htmlHead: lastStatus >= 400 || lastItems === 0 ? lastHtmlHead : undefined,
+      method: lastMethod,
       bestScore,
       status: lastStatus,
       cookieSent: !!sessionCookie,
