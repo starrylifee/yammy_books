@@ -1,0 +1,20 @@
+# 환경 변수 (민감 정보)
+.env
+.env.local
+.env.*.local
+
+# 의존성
+node_modules/
+
+# 빌드 결과물
+dist/
+
+# 에디터 설정
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS 파일
+.DS_Store
+Thumbs.db

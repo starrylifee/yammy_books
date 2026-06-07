@@ -1,0 +1,19 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 사용자 본인의 books 컬렉션만 접근 가능
+    // users/{uid}/books/{bookId}
+    match /users/{uid}/books/{bookId} {
+      // 로그인 상태 + 본인 uid만 읽기/쓰기 허용
+      allow read, write: if request.auth != null
+                         && request.auth.uid == uid;
+    }
+
+    // 그 외 모든 경로 거부
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

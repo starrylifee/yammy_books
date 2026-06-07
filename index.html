@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Yammy Books — 독서 체크 + 도서관 대출 확인</title>
+  <meta name="description" content="읽은 책 체크, CSV 업로드, 송파어린이도서관·소나무언덕2호도서관·독서로(버들초) 대출 가능 확인. Yammy Books와 함께 독서 기록을 관리하세요." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+
+  <!-- ══════ AUTH SCREEN ══════ -->
+  <div id="authScreen" class="auth-container">
+    <div class="card auth-card" style="animation-delay: 0.1s;">
+      <div class="brand-large">📚</div>
+      <h1>Yammy Books</h1>
+      <p class="auth-subtitle">읽은 책 체크 + 도서관 대출 가능 확인</p>
+      <p class="auth-desc">버들초 학생과 선생님만 사용할 수 있어요.</p>
+
+      <button id="googleLoginBtn" class="btn-google">
+        <svg width="20" height="20" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+        </svg>
+        Google로 시작하기
+      </button>
+      <div id="googleLoginError" class="auth-error"></div>
+    </div>
+  </div>
+
+  <!-- ══════ MAIN APP ══════ -->
+  <div id="appScreen" class="app-shell hidden">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-icon">📚</span>
+        <div>
+          <h1>Yammy Books</h1>
+          <p class="subtitle">읽은 책 체크 + 도서관 대출 가능 확인</p>
+        </div>
+      </div>
+      <div id="authBar"></div>
+    </header>
+
+    <!-- ── 야미독서 리스트 불러오기 ── -->
+    <section class="card yammy-import-card" style="animation-delay: 0.12s;">
+      <div class="section-header">
+        <span class="icon">🌟</span>
+        <h2>야미독서 리스트 불러오기</h2>
+      </div>
+      <p class="yammy-desc">학년을 선택하면 버들초 권장도서 40권이 내 목록에 추가됩니다.</p>
+      <div class="grade-selector">
+        <button class="grade-btn" data-grade="1">1학년</button>
+        <button class="grade-btn" data-grade="2">2학년</button>
+        <button class="grade-btn" data-grade="3">3학년</button>
+        <button class="grade-btn" data-grade="4">4학년</button>
+        <button class="grade-btn" data-grade="5">5학년</button>
+        <button class="grade-btn" data-grade="6">6학년</button>
+      </div>
+      <div id="gradePreview" class="grade-preview hidden"></div>
+    </section>
+
+    <!-- ── Controls ── -->
+    <section class="card" style="animation-delay: 0.15s;">
+      <div class="controls-grid">
+        <!-- Add Book -->
+        <div class="control-block">
+          <h3>📖 책 직접 추가</h3>
+          <form id="bookForm" class="book-form">
+            <input name="title" placeholder="책 제목" required />
+            <input name="author" placeholder="저자" required />
+            <input name="publisher" placeholder="출판사 (선택)" />
+            <input name="activityNote" placeholder="독후활동 / 메모 (선택)" />
+            <div class="form-actions full-width">
+              <label class="checkbox-label">
+                <input type="checkbox" name="confirmed" /> 확인표시
+              </label>
+              <button type="submit" class="btn-add">＋ 추가</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- CSV Upload & Batch Check -->
+        <div class="control-block">
+          <h3>📄 CSV 업로드</h3>
+          <div class="csv-controls">
+            <div class="csv-row">
+              <input id="csvFile" type="file" accept=".csv,text/csv" />
+            </div>
+            <div class="csv-row">
+              <button id="csvUploadBtn" type="button" class="btn-csv">CSV 업로드</button>
+              <a class="btn-sample" href="/sample-books.csv" download>📥 샘플 CSV</a>
+            </div>
+            <p class="csv-hint">헤더: title, author, publisher, activityNote, confirmed</p>
+          </div>
+
+          <div style="margin-top: 18px;">
+            <h3>🔍 일괄 조회</h3>
+            <button id="checkUnreadBtn" type="button" class="btn-check-unread">
+              안 읽은 책만 대출 가능 확인
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Filters ── -->
+    <section class="card" style="animation-delay: 0.2s;">
+      <div class="filters-bar">
+        <input id="searchInput" class="search-input" placeholder="🔎 제목 / 저자 검색..." />
+        <select id="statusFilter">
+          <option value="all">📋 전체</option>
+          <option value="read">✅ 읽은 책</option>
+          <option value="unread">📕 안 읽은 책</option>
+          <option value="available">🟢 대출 가능</option>
+          <option value="unavailable">🔴 대출 불가 / 미소장</option>
+          <option value="unchecked">⬜ 미조회</option>
+        </select>
+        <span id="bookCount" class="book-count"></span>
+      </div>
+    </section>
+
+    <!-- ── Book Table ── -->
+    <section class="card table-card" style="animation-delay: 0.25s;">
+      <div class="card-header">
+        <span>📚</span>
+        <h2>내 책 목록</h2>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>읽음</th>
+            <th>제목</th>
+            <th>저자</th>
+            <th>출판사</th>
+            <th>메모</th>
+            <th>송파어린이</th>
+            <th>소나무2호</th>
+            <th>독서로(버들초)</th>
+            <th>동작</th>
+          </tr>
+        </thead>
+        <tbody id="booksTbody"></tbody>
+      </table>
+    </section>
+  </div>
+  <!-- ── Edit Book Modal ── -->
+  <div id="editModal" class="modal-overlay hidden">
+    <div class="modal-card card">
+      <div class="section-header">
+        <span class="icon">✏️</span>
+        <h2>책 정보 수정</h2>
+      </div>
+      <form id="editBookForm" class="auth-form">
+        <input type="hidden" id="editBookId" />
+        <label class="modal-label">제목</label>
+        <input id="editTitle" name="title" placeholder="책 제목" required />
+        <label class="modal-label">저자</label>
+        <input id="editAuthor" name="author" placeholder="저자" required />
+        <label class="modal-label">출판사</label>
+        <input id="editPublisher" name="publisher" placeholder="출판사" />
+        <label class="modal-label">메모 / 독후활동</label>
+        <input id="editNote" name="activityNote" placeholder="메모 (선택)" />
+        <label class="checkbox-label">
+          <input type="checkbox" id="editConfirmed" name="confirmed" /> 확인표시
+        </label>
+        <div class="modal-actions">
+          <button type="submit" class="btn-primary">저장</button>
+          <button type="button" id="editCancelBtn" class="btn-cancel">취소</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── Toast Container ── -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
