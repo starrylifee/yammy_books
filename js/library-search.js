@@ -21,7 +21,10 @@ async function checkSingleSource(title, author, publisher, source) {
     console.log(
       `[조회] ${source} "${title}" → matched=${data.matched} ` +
         `items=${data._debug?.items ?? '?'} htmlLen=${data._debug?.htmlLen ?? '?'} ` +
-        `status=${data._debug?.status ?? '?'} cookie=${data._debug?.cookieSent ?? '?'}` +
+        `status=${data._debug?.status ?? '?'} method=${data._debug?.method ?? '?'} ` +
+        `cookie=${data._debug?.cookieSent ?? '?'} region=${data._debug?.vercelRegion ?? '?'} ` +
+        `commit=${data._debug?.vercelCommit?.slice?.(0, 7) ?? '?'} ` +
+        `get=${data._debug?.getFallback?.status ?? '-'}/${data._debug?.getFallback?.items ?? '-'}` +
         (data.error ? ` error=${data.error}` : ''),
       data,
     );

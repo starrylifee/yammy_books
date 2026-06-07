@@ -279,6 +279,14 @@ async function handleSplib(source, title, author, publisher, lib, res) {
     // 같은 검색을 GET 쿼리스트링으로 보내면 송파 사이트가 세션을 새로 내려주며 HTML을 반환한다.
     if (pageRes.status === 400) {
       const getRes = await fetchSplibPage(lib, title, page, '', 'GET');
+      if (diag) {
+        diag.getFallback = {
+          status: getRes.status,
+          items: getRes.items.length,
+          htmlLen: getRes.htmlLen,
+          cookieReceived: !!getRes.respCookie,
+        };
+      }
       if (getRes.status < 400 || getRes.items.length > pageRes.items.length) {
         if (getRes.respCookie) sessionCookie = getRes.respCookie;
         if (diag) diag.usedGetFallback = true;
@@ -341,6 +349,9 @@ async function handleSplib(source, title, author, publisher, lib, res) {
       status: lastStatus,
       cookieSent: !!sessionCookie,
       retried,
+      vercelRegion: process.env.VERCEL_REGION || process.env.AWS_REGION || '',
+      vercelCommit: process.env.VERCEL_GIT_COMMIT_SHA || '',
+      vercelRef: process.env.VERCEL_GIT_COMMIT_REF || '',
       ...diag,
     },
     checkedAt: Math.floor(Date.now() / 1000),
