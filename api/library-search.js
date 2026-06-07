@@ -138,7 +138,27 @@ function findBestMatch(items, title, author, publisher) {
 
 async function handleSplib(source, title, author, publisher, lib, res) {
   const queryStr = `${title} ${author || ''}`.trim();
-  // Python 참조 코드와 동일하게 제목만 검색 (저자는 매칭 스코어에만 활용)
+  const simpleUrl = lib.searchUrl.replace('plusSearchResultList.do', 'plusSearchSimple.do');
+  const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+  // Step 1: GET 검색폼 → JSESSIONID 획득 (Python Playwright과 동일한 흐름)
+  let sessionCookie = '';
+  try {
+    const sessionRes = await fetch(simpleUrl, {
+      method: 'GET',
+      headers: { 'User-Agent': UA, Accept: 'text/html', 'Accept-Language': 'ko-KR,ko;q=0.9' },
+      redirect: 'follow',
+    });
+    const setCookie = sessionRes.headers.get('set-cookie') || '';
+    // JSESSIONID 우선, 없으면 첫 번째 쿠키 사용
+    const m = setCookie.match(/JSESSIONID=[^;]+/i) || setCookie.match(/[A-Za-z0-9_]+=\S[^;]*/);
+    if (m) sessionCookie = m[0];
+    console.log(`[splib ${source}] session GET status=${sessionRes.status} cookie="${sessionCookie}"`);
+  } catch (e) {
+    console.log(`[splib ${source}] session GET failed: ${e.message}`);
+  }
+
+  // Step 2: POST 검색 (제목만, 저자는 매칭 스코어에서만 사용)
   const params = new URLSearchParams({
     searchType: 'SIMPLE',
     searchCategory: 'BOOK',
@@ -147,19 +167,31 @@ async function handleSplib(source, title, author, publisher, lib, res) {
     searchLibraryArr: lib.libraryCode,
   });
 
+  const reqHeaders = {
+    'User-Agent': UA,
+    'Content-Type': 'application/x-www-form-urlencoded',
+    Origin: new URL(lib.searchUrl).origin,
+    Referer: simpleUrl,
+    Accept: 'text/html,application/xhtml+xml,*/*;q=0.9',
+    'Accept-Language': 'ko-KR,ko;q=0.9',
+  };
+  if (sessionCookie) reqHeaders['Cookie'] = sessionCookie;
+
   const response = await fetch(lib.searchUrl, {
     method: 'POST',
-    headers: {
-      'User-Agent': 'Mozilla/5.0',
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Origin: new URL(lib.searchUrl).origin,
-      Referer: lib.searchUrl.replace('plusSearchResultList.do', 'plusSearchSimple.do'),
-    },
+    headers: reqHeaders,
     body: params.toString(),
   });
 
   const html = await response.text();
   const items = parseSearchResults(html);
+
+  // 디버그 로그 — vercel dev 콘솔에서 확인
+  console.log(`[splib ${source}] "${title}" → HTTP ${response.status}, htmlLen=${html.length}, items=${items.length}`);
+  if (items.length === 0) {
+    console.log(`[splib ${source}] HTML snippet: ${html.substring(0, 600)}`);
+  }
+
   const { best, bestScore } = findBestMatch(items, title, author, publisher);
 
   return res.status(200).json({
@@ -168,6 +200,7 @@ async function handleSplib(source, title, author, publisher, lib, res) {
     query: queryStr,
     matched: best !== null && bestScore >= 0,
     result: best,
+    _debug: { items: items.length, htmlLen: html.length },
     checkedAt: Math.floor(Date.now() / 1000),
   });
 }
