@@ -6,6 +6,7 @@ const LIBRARIES = {
   spclib: {
     name: '송파어린이도서관',
     type: 'splib',
+    homeUrl: 'https://www.splib.or.kr/spclib/index.do',
     formUrl: 'https://www.splib.or.kr/spclib/menu/10243/program/30001/plusSearchSimple.do',
     searchUrl: 'https://www.splib.or.kr/spclib/menu/10243/program/30001/plusSearchResultList.do',
     // 검색은 송파 전 도서관을 반환하므로, 결과의 도서관명으로 필터링한다.
@@ -14,6 +15,7 @@ const LIBRARIES = {
   sp2lib: {
     name: '소나무언덕2호도서관',
     type: 'splib',
+    homeUrl: 'https://www.splib.or.kr/sp2lib/index.do',
     formUrl: 'https://www.splib.or.kr/sp2lib/menu/10488/program/30001/plusSearchSimple.do',
     searchUrl: 'https://www.splib.or.kr/sp2lib/menu/10488/program/30001/plusSearchResultList.do',
     matchName: '소나무언덕2호',
@@ -169,22 +171,47 @@ function parseTotalCount(html) {
   return m ? parseInt(m[1].replace(/,/g, ''), 10) : 0;
 }
 
-// JSESSIONID 쿠키 획득: manual redirect로 302의 set-cookie까지 포착, 실패 시 follow 재시도
+// JSESSIONID 쿠키 획득: 검색폼 URL은 직접 GET 시 400을 줄 수 있어 도서관 홈을 먼저 밟는다.
 // diag 객체에 진단 정보를 기록한다.
 async function getSplibSessionCookie(lib, diag) {
-  const headers = { 'User-Agent': SPLIB_UA, Accept: 'text/html', 'Accept-Language': 'ko-KR,ko;q=0.9' };
-  for (const mode of ['manual', 'follow']) {
-    try {
-      const r = await fetch(lib.formUrl, { method: 'GET', headers, redirect: mode });
-      if (diag) {
-        diag.sessionStatus = r.status;
-        diag.hasGetSetCookie = typeof r.headers.getSetCookie === 'function';
-        diag.rawSetCookieLen = (r.headers.get('set-cookie') || '').length;
+  const headers = {
+    'User-Agent': SPLIB_UA,
+    Accept: 'text/html,application/xhtml+xml,*/*;q=0.9',
+    'Accept-Language': 'ko-KR,ko;q=0.9',
+    'Upgrade-Insecure-Requests': '1',
+  };
+  const urls = [lib.homeUrl, lib.formUrl].filter(Boolean);
+
+  if (diag) diag.sessionAttempts = [];
+
+  for (const url of urls) {
+    for (const mode of ['follow', 'manual']) {
+      try {
+        const r = await fetch(url, { method: 'GET', headers, redirect: mode });
+        const rawCookie = r.headers.get('set-cookie') || '';
+        if (diag) {
+          diag.sessionStatus = r.status;
+          diag.hasGetSetCookie = typeof r.headers.getSetCookie === 'function';
+          diag.rawSetCookieLen = rawCookie.length;
+          diag.sessionAttempts.push({
+            url: url.replace(/^https:\/\/www\.splib\.or\.kr/, ''),
+            mode,
+            status: r.status,
+            cookieLen: rawCookie.length,
+          });
+        }
+        const c = extractSessionCookie(r.headers);
+        if (c) return c;
+      } catch (e) {
+        if (diag) {
+          diag.sessionError = e.message;
+          diag.sessionAttempts.push({
+            url: url.replace(/^https:\/\/www\.splib\.or\.kr/, ''),
+            mode,
+            error: e.message,
+          });
+        }
       }
-      const c = extractSessionCookie(r.headers);
-      if (c) return c;
-    } catch (e) {
-      if (diag) diag.sessionError = e.message;
     }
   }
   return '';
@@ -202,7 +229,7 @@ async function fetchSplibPage(lib, title, pageNo, cookie) {
     'User-Agent': SPLIB_UA,
     'Content-Type': 'application/x-www-form-urlencoded',
     Origin: new URL(lib.searchUrl).origin,
-    Referer: lib.formUrl,
+    Referer: lib.homeUrl || lib.formUrl,
     Accept: 'text/html,application/xhtml+xml,*/*;q=0.9',
     'Accept-Language': 'ko-KR,ko;q=0.9',
   };
@@ -217,6 +244,8 @@ async function fetchSplibPage(lib, title, pageNo, cookie) {
     items: parseSearchResults(html),
     total: parseTotalCount(html),
     respCookie,
+    htmlLen: html.length,
+    htmlHead: stripTags(html).slice(0, 700),
   };
 }
 
@@ -235,6 +264,9 @@ async function handleSplib(source, title, author, publisher, lib, res) {
   let lastStatus = 0;
   let pagesFetched = 0;
   let retried = false;
+  let lastHtmlLen = 0;
+  let lastHtmlHead = '';
+  let lastItems = 0;
 
   for (let page = 1; page <= SPLIB_MAX_PAGES; page++) {
     let pageRes = await fetchSplibPage(lib, title, page, sessionCookie);
@@ -250,6 +282,9 @@ async function handleSplib(source, title, author, publisher, lib, res) {
     }
 
     lastStatus = pageRes.status;
+    lastHtmlLen = pageRes.htmlLen;
+    lastHtmlHead = pageRes.htmlHead;
+    lastItems = pageRes.items.length;
     pagesFetched = page;
     if (page === 1) total = pageRes.total;
 
@@ -282,6 +317,9 @@ async function handleSplib(source, title, author, publisher, lib, res) {
       total,
       pagesFetched,
       libItems: libItems.length,
+      items: lastItems,
+      htmlLen: lastHtmlLen,
+      htmlHead: lastStatus >= 400 || lastItems === 0 ? lastHtmlHead : undefined,
       bestScore,
       status: lastStatus,
       cookieSent: !!sessionCookie,
