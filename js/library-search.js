@@ -4,12 +4,12 @@
 
 const LIBRARY_SOURCES = ['spclib', 'sp2lib', 'bdllib'];
 
-async function checkSingleSource(title, author, source) {
+async function checkSingleSource(title, author, publisher, source) {
   try {
     const res = await fetch('/api/library-search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source, title, author }),
+      body: JSON.stringify({ source, title, author, publisher }),
     });
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
@@ -28,10 +28,10 @@ async function checkSingleSource(title, author, source) {
 /**
  * 단일 책에 대해 모든 도서관 소스 조회
  */
-export async function checkBook(title, author) {
+export async function checkBook(title, author, publisher) {
   const results = {};
   for (const source of LIBRARY_SOURCES) {
-    results[source] = await checkSingleSource(title, author, source);
+    results[source] = await checkSingleSource(title, author, publisher, source);
   }
   return results;
 }
@@ -41,7 +41,7 @@ export async function checkBook(title, author) {
  */
 export async function checkMultipleBooks(books, onResult) {
   for (const book of books) {
-    const availability = await checkBook(book.title, book.author);
+    const availability = await checkBook(book.title, book.author, book.publisher);
     await onResult(book.id, availability);
   }
 }
@@ -53,7 +53,7 @@ export async function checkMultipleBooks(books, onResult) {
  */
 export async function checkBooksForSource(books, source, onResult) {
   for (const book of books) {
-    const result = await checkSingleSource(book.title, book.author, source);
+    const result = await checkSingleSource(book.title, book.author, book.publisher, source);
     await onResult(book.id, source, result);
   }
 }
