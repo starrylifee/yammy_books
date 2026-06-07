@@ -791,12 +791,6 @@ tr.is-read .book-title-text {
   color: var(--color-text-muted);
 }
 
-.book-note {
-  color: var(--color-text-dim);
-  font-size: var(--font-xs);
-  max-width: 140px;
-}
-
 /* ── Read Toggle Checkbox ── */
 td input[type="checkbox"] {
   width: 20px;

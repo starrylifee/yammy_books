@@ -135,7 +135,7 @@ function renderBooks() {
   if (!books.length) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td colspan="9">
+      <td colspan="8">
         <div class="empty-state">
           <div class="empty-icon">📚</div>
           <p>아직 표시할 책이 없어요.<br />직접 추가하거나 CSV를 올려보세요.</p>
@@ -160,7 +160,6 @@ function renderBooks() {
       </td>
       <td class="book-meta">${escapeHtml(book.author)}</td>
       <td class="book-meta">${escapeHtml(book.publisher || '')}</td>
-      <td class="book-note">${escapeHtml(book.activityNote || '')}</td>
       <td>${availabilitySummary(book, 'spclib')}</td>
       <td>${availabilitySummary(book, 'sp2lib')}</td>
       <td>${availabilitySummary(book, 'bdllib')}</td>
