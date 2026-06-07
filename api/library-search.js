@@ -460,122 +460,156 @@ async function handleDoksero(source, title, author, publisher, lib, res) {
   const queryStr = `${title} ${author || ''}`.trim();
   const BASE = 'https://read365.edunet.net';
   const HEADERS = {
-    'User-Agent': 'Mozilla/5.0',
-    'Referer': `${BASE}/`,
     'Accept': 'application/json, text/plain, */*',
+    'Content-Type': 'application/json;charset=UTF-8',
+    'Origin': BASE,
+    'Referer': `${BASE}/SchoolSearchResult`,
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   };
 
-  const API = `${BASE}/schome/service/readingActivitesMng/readingActivites`;
+  const searchUrl = `${BASE}/alpasq/api/search`;
+  const searchBody = {
+    searchKeyword: title,
+    isbn: '',
+    author: '',
+    publisher: '',
+    startPubYear: '',
+    endPubYear: '',
+    pubFormCode: '',
+    page: '1',
+    display: '10',
+    neisCode: [lib.neisCode],
+    provCode: lib.provCode,
+    coverYn: 'N',
+    facet: 'Y',
+  };
 
-  // Step 1: bookList?searchWord=... 로 도서 목록 검색
-  const listUrl = new URL(`${API}/bookList`);
-  listUrl.searchParams.set('searchWord', title);
-  listUrl.searchParams.set('neisCode', lib.neisCode);
-  listUrl.searchParams.set('provCode', lib.provCode);
-  listUrl.searchParams.set('pageSize', '10');
-  listUrl.searchParams.set('pageIndex', '1');
-
-  let listData;
+  let listData = null;
+  let listStatus = 0;
+  let listText = '';
   try {
-    const listRes = await fetch(listUrl.toString(), { headers: HEADERS });
+    const listRes = await fetch(searchUrl, {
+      method: 'POST',
+      headers: HEADERS,
+      body: JSON.stringify(searchBody),
+    });
+    listStatus = listRes.status;
     const ct = listRes.headers.get('content-type') || '';
+    listText = await listRes.text();
     if (!ct.includes('json')) {
       return res.status(200).json({
         source, libraryName: lib.name, query: queryStr,
         matched: false, result: null, error: 'API_ENDPOINT_UNKNOWN',
+        _debug: {
+          endpoint: '/alpasq/api/search',
+          status: listStatus,
+          method: 'POST',
+          items: 0,
+          htmlLen: listText.length,
+          region: process.env.VERCEL_REGION || process.env.AWS_REGION || '',
+          commit: process.env.VERCEL_GIT_COMMIT_SHA || '',
+        },
         checkedAt: Math.floor(Date.now() / 1000),
       });
     }
-    listData = await listRes.json();
+    listData = JSON.parse(listText);
   } catch (err) {
     return res.status(200).json({
       source, libraryName: lib.name, query: queryStr,
       matched: false, result: null, error: err.message,
+      _debug: {
+        endpoint: '/alpasq/api/search',
+        status: listStatus,
+        method: 'POST',
+        items: 0,
+        htmlLen: listText.length,
+        region: process.env.VERCEL_REGION || process.env.AWS_REGION || '',
+        commit: process.env.VERCEL_GIT_COMMIT_SHA || '',
+      },
       checkedAt: Math.floor(Date.now() / 1000),
     });
   }
 
-  // 응답 구조 유연하게 파싱
-  const bookList =
-    listData?.list ||
-    listData?.result?.list ||
-    listData?.data ||
-    listData?.books ||
-    [];
+  const bookList = Array.isArray(listData?.data?.bookList) ? listData.data.bookList : [];
+  const debugBase = {
+    endpoint: '/alpasq/api/search',
+    status: listStatus,
+    method: 'POST',
+    items: bookList.length,
+    total: listData?.data?.allTotalCount || listData?.data?.totalCount || 0,
+    apiStatus: listData?.status || '',
+    message: listData?.message || '',
+    region: process.env.VERCEL_REGION || process.env.AWS_REGION || '',
+    commit: process.env.VERCEL_GIT_COMMIT_SHA || '',
+  };
 
   if (!bookList.length) {
     return res.status(200).json({
       source, libraryName: lib.name, query: queryStr,
       matched: false, result: null,
+      _debug: {
+        ...debugBase,
+        bestScore: -1,
+      },
       checkedAt: Math.floor(Date.now() / 1000),
     });
   }
 
-  // Python 참조 코드 기반 스코어링
-  const normTitle = title.replace(/\s+/g, '').toLowerCase();
-  const normAuthor = (author || '').replace(/\s+/g, '').toLowerCase();
-  const normPub = (publisher || '').replace(/\s+/g, '').toLowerCase();
-  let bestBook = null;
-  let bestScore = -1;
+  const { best: bestBook, bestScore } = findBestMatch(bookList, title, author, publisher);
 
-  for (const item of bookList) {
-    const iTitle = (item.title || item.bookTitle || item.bookNm || '').replace(/\s+/g, '').toLowerCase();
-    const iAuthor = (item.author || item.bkAuthor || item.writerNm || '').replace(/\s+/g, '').toLowerCase();
-    const iPub = (item.publisher || item.pubNm || item.press || '').replace(/\s+/g, '').toLowerCase();
-    const bookKey = item.bookKey || item.bkKey || item.id;
-    if (!bookKey) continue;
-
-    let score = 0;
-    if (normPub && iPub && normPub === iPub) score += 100;
-    if (normAuthor.length >= 2 && iAuthor.includes(normAuthor.substring(0, Math.min(4, normAuthor.length)))) score += 50;
-    if (normTitle && iTitle === normTitle) score += 30;
-    else if (normTitle && (iTitle.includes(normTitle) || normTitle.includes(iTitle))) score += 20;
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestBook = { bookKey, title: iTitle, author: iAuthor, shelf: item.shelf || item.callNo || '' };
-    }
-  }
-
-  if (!bestBook || bestScore < 0) {
+  if (!bestBook || bestScore < 20) {
     return res.status(200).json({
       source, libraryName: lib.name, query: queryStr,
       matched: false, result: null,
+      _debug: {
+        ...debugBase,
+        bestScore,
+      },
       checkedAt: Math.floor(Date.now() / 1000),
     });
   }
 
-  // Step 2: state?bookKey=...&provCode=...&neisCode=... 로 대출 상태 확인
-  const stateUrl = new URL(`${API}/state`);
+  const stateUrl = new URL(`${BASE}/alpasq/api/search/book/state`);
   stateUrl.searchParams.set('bookKey', bestBook.bookKey);
-  stateUrl.searchParams.set('provCode', lib.provCode);
-  stateUrl.searchParams.set('neisCode', lib.neisCode);
+  stateUrl.searchParams.set('provCode', bestBook.provCode || lib.provCode);
+  stateUrl.searchParams.set('neisCode', bestBook.neisCode || lib.neisCode);
 
-  let available = false;
-  let statusText = '소장';
+  let stateStatus = 0;
+  let stateData = null;
+  let statusText = bestBook.status || '소장';
+  let available = statusText.includes('가능');
 
   try {
-    const stateRes = await fetch(stateUrl.toString(), { headers: HEADERS });
+    const stateRes = await fetch(stateUrl.toString(), {
+      headers: {
+        Accept: HEADERS.Accept,
+        Referer: HEADERS.Referer,
+        'User-Agent': HEADERS['User-Agent'],
+      },
+    });
+    stateStatus = stateRes.status;
     if (stateRes.ok) {
       const ct = stateRes.headers.get('content-type') || '';
       if (ct.includes('json')) {
-        const stateData = await stateRes.json();
+        stateData = await stateRes.json();
         const loanStatus =
-          stateData?.loanStatus ||
+          stateData?.data?.status ||
+          stateData?.data?.loanStatus ||
           stateData?.status ||
-          stateData?.rentalStatus ||
-          stateData?.state ||
           '';
-        statusText = loanStatus || '소장';
+        statusText = loanStatus || statusText;
         available =
           loanStatus.includes('가능') ||
           loanStatus === 'Y' ||
-          stateData?.available === true;
+          stateData?.data?.available === true;
       }
     }
   } catch {
     // state 조회 실패 시 소장 사실만 반환
   }
+
+  const enrichedBook = stateData?.data ? { ...bestBook, ...stateData.data } : bestBook;
 
   return res.status(200).json({
     source,
@@ -583,12 +617,18 @@ async function handleDoksero(source, title, author, publisher, lib, res) {
     query: queryStr,
     matched: true,
     result: {
-      title: bestBook.title,
-      author: bestBook.author,
+      title: enrichedBook.title || bestBook.title,
+      author: enrichedBook.author || bestBook.author,
       statusText,
       available,
-      libraryName: lib.name,
-      shelf: bestBook.shelf,
+      libraryName: enrichedBook.schoolName || enrichedBook.libName || lib.name,
+      shelf: [enrichedBook.callNo, enrichedBook.locationName].filter(Boolean).join(' '),
+    },
+    _debug: {
+      ...debugBase,
+      bestScore,
+      stateStatus,
+      stateApiStatus: stateData?.status || '',
     },
     checkedAt: Math.floor(Date.now() / 1000),
   });
