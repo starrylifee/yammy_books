@@ -28,17 +28,104 @@ const LIBRARIES = {
   },
 };
 
-function stripTags(html) {
-  let text = html.replace(/<br\s*\/?>/gi, ' ');
-  text = text.replace(/<[^>]+>/g, '');
-  text = text
+function decodeHtml(text) {
+  return text
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, ' ');
+}
+
+function stripTags(html) {
+  let text = html.replace(/<br\s*\/?>/gi, ' ');
+  text = text.replace(/<[^>]+>/g, '');
+  text = decodeHtml(text);
   return text.replace(/\s+/g, ' ').trim();
+}
+
+function htmlToLines(html) {
+  const cleaned = html
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/?(?:div|p|li|ul|ol|table|thead|tbody|tr|td|th|span|strong|a|b|em|h[1-6])[^>]*>/gi, '\n')
+    .replace(/<[^>]+>/g, '\n');
+  return decodeHtml(cleaned)
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function normalizeLoose(str) {
+  return (str || '')
+    .replace(/\[[^\]]+\]/g, '')
+    .replace(/\([^)]*\)/g, '')
+    .replace(/[:：·ㆍ.,!?'"“”‘’\-–—\s]/g, '')
+    .toLowerCase();
+}
+
+function looksLikeCallNo(str) {
+  return /\d{2,3}[.\-]\d/.test(str) || /(?:아동|유아|어린이|청소년|일반)\s*\d/.test(str);
+}
+
+function parseTextSearchResults(html) {
+  const lines = htmlToLines(html);
+  const items = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const titleMatch = lines[i].match(/^(?:도서|단행본|전자책)?\s*(\d+)\.\s*(.+)$/);
+    if (!titleMatch) continue;
+
+    const title = titleMatch[2].trim();
+    if (!title || title.length < 2) continue;
+
+    const windowLines = lines.slice(i + 1, i + 18);
+    const author = windowLines.find((line) => /(지음|글|그림|저|엮음|옮김|원작|글씀)/.test(line)) || '';
+    const publisher = windowLines.find((line) =>
+      line &&
+      !/(예약|반납|대출|소장정보|관심도서|위치출력|도서관|^\d{4}$)/.test(line) &&
+      !/(지음|글|그림|저|엮음|옮김|원작|글씀)/.test(line) &&
+      !looksLikeCallNo(line),
+    ) || '';
+    const callNo = windowLines.find(looksLikeCallNo) || '';
+    const libraryIndex = windowLines.findIndex((line) => line.includes('도서관'));
+    const libraryName =
+      libraryIndex >= 0
+        ? [windowLines[libraryIndex], windowLines[libraryIndex + 1] || '']
+            .filter((line) => line && !/(예약|반납|대출|소장정보|관심도서|위치출력)/.test(line))
+            .join(' ')
+            .trim()
+        : '';
+    const statusText = windowLines.find((line) => line.includes('대출가능') || line.includes('대출불가')) || '';
+
+    items.push({
+      title,
+      author,
+      publisher,
+      callNo,
+      libraryName,
+      statusText,
+      available: statusText.includes('대출가능'),
+      _parser: 'text',
+    });
+  }
+
+  return items;
+}
+
+function mergeSearchItems(primary, fallback) {
+  const seen = new Set();
+  const merged = [];
+  for (const item of [...primary, ...fallback]) {
+    const key = `${normalizeLoose(item.title)}|${normalizeLoose(item.libraryName)}|${item.callNo || ''}`;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(item);
+  }
+  return merged;
 }
 
 function parseSearchResults(html) {
@@ -98,25 +185,26 @@ function parseSearchResults(html) {
       libraryName,
       statusText,
       available,
+      _parser: 'html',
     });
   }
 
-  return items;
+  return mergeSearchItems(items, parseTextSearchResults(html));
 }
 
 // Python 참조 코드 기반 스코어링: publisher(+100), author(+50), title exact(+30), title contains(+20)
 function findBestMatch(items, title, author, publisher) {
-  const normTitle = title.replace(/\s+/g, '').toLowerCase();
-  const normAuthor = (author || '').replace(/\s+/g, '').toLowerCase();
-  const normPub = (publisher || '').replace(/\s+/g, '').toLowerCase();
+  const normTitle = normalizeLoose(title);
+  const normAuthor = normalizeLoose(author || '');
+  const normPub = normalizeLoose(publisher || '');
   let best = null;
   let bestScore = -1;
 
   for (const item of items) {
     let score = 0;
-    const itTitle = item.title.replace(/\s+/g, '').toLowerCase();
-    const itAuthor = item.author.replace(/\s+/g, '').toLowerCase();
-    const itPub = item.publisher.replace(/\s+/g, '').toLowerCase();
+    const itTitle = normalizeLoose(item.title);
+    const itAuthor = normalizeLoose(item.author);
+    const itPub = normalizeLoose(item.publisher);
 
     // 출판사 정확 매칭 (가장 강력한 식별자)
     if (normPub && itPub && normPub === itPub) score += 100;
@@ -271,6 +359,7 @@ async function handleSplib(source, title, author, publisher, lib, res) {
   let lastHtmlHead = '';
   let lastItems = 0;
   let lastMethod = 'POST';
+  let lastSampleItems = [];
 
   for (let page = 1; page <= SPLIB_MAX_PAGES; page++) {
     let pageRes = await fetchSplibPage(lib, title, page, sessionCookie);
@@ -309,6 +398,14 @@ async function handleSplib(source, title, author, publisher, lib, res) {
     lastHtmlHead = pageRes.htmlHead;
     lastItems = pageRes.items.length;
     lastMethod = pageRes.method;
+    lastSampleItems = pageRes.items.slice(0, 5).map((item) => ({
+      title: item.title,
+      author: item.author,
+      publisher: item.publisher,
+      libraryName: item.libraryName,
+      statusText: item.statusText,
+      parser: item._parser,
+    }));
     pagesFetched = page;
     if (page === 1) total = pageRes.total;
 
@@ -345,6 +442,7 @@ async function handleSplib(source, title, author, publisher, lib, res) {
       htmlLen: lastHtmlLen,
       htmlHead: lastStatus >= 400 || lastItems === 0 ? lastHtmlHead : undefined,
       method: lastMethod,
+      sampleItems: !matched ? lastSampleItems : undefined,
       bestScore,
       status: lastStatus,
       cookieSent: !!sessionCookie,
