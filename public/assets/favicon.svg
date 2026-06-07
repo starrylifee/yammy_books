@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Yammy Books">
+  <defs>
+    <linearGradient id="bg" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#14b8a6"/>
+      <stop offset="0.52" stop-color="#f59e0b"/>
+      <stop offset="1" stop-color="#ef4444"/>
+    </linearGradient>
+    <linearGradient id="page" x1="20" y1="18" x2="48" y2="45" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#fff7ed"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="#111827"/>
+  <rect x="6" y="6" width="52" height="52" rx="13" fill="url(#bg)"/>
+  <path d="M18 21.5c0-2.5 2-4.5 4.5-4.5H31c2.4 0 4.8.8 6.8 2.2 1.4-1.4 3.3-2.2 5.3-2.2H47c2.2 0 4 1.8 4 4v24.6c0 1.7-1.7 2.8-3.2 2.1-3.7-1.8-7.5-1.7-11.3.2a3.2 3.2 0 0 1-2.9 0c-3.8-1.9-7.6-2-11.3-.2-1.5.7-3.3-.4-3.3-2.1V21.5Z" fill="#111827" opacity=".22"/>
+  <path d="M16 19.5c0-2.5 2-4.5 4.5-4.5H29c2.5 0 4.9.9 7 2.5 2-1.6 4.5-2.5 7-2.5h4.5c2.5 0 4.5 2 4.5 4.5v24.8c0 1.9-2 3-3.6 2.2-3.9-1.9-8-1.8-12.4.2-4.4-2-8.5-2.1-12.4-.2-1.6.8-3.6-.3-3.6-2.2V19.5Z" fill="url(#page)"/>
+  <path d="M36 17.5v29.2" stroke="#f59e0b" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M22.5 24.5h7.5M22.5 31h8.5M22.5 37.5h6" stroke="#0f766e" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M41.5 24.5 44 29l5 .7-3.7 3.5.9 5-4.7-2.4-4.6 2.4.9-5-3.7-3.5 5-.7 2.4-4.5Z" fill="#f59e0b"/>
+  <path d="M28.7 19.7 35 31.3l6.4-11.6h4.2l-8.5 15v7.6h-4.2v-7.6l-8.5-15h4.3Z" fill="#111827" opacity=".88"/>
+</svg>
