@@ -13,10 +13,20 @@ async function checkSingleSource(title, author, publisher, source) {
     });
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
+      console.warn(`[조회 실패] ${source} "${title}" → HTTP ${res.status}`, errData);
       throw new Error(errData.error || `HTTP ${res.status}`);
     }
-    return await res.json();
+    const data = await res.json();
+    // 브라우저 콘솔 디버그 — 서버가 돌려준 파싱 결과 확인
+    console.log(
+      `[조회] ${source} "${title}" → matched=${data.matched} ` +
+        `items=${data._debug?.items ?? '?'} htmlLen=${data._debug?.htmlLen ?? '?'}` +
+        (data.error ? ` error=${data.error}` : ''),
+      data,
+    );
+    return data;
   } catch (err) {
+    console.error(`[조회 오류] ${source} "${title}":`, err.message);
     return {
       source,
       error: err.message,
