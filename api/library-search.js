@@ -6,14 +6,17 @@ const LIBRARIES = {
   spclib: {
     name: '송파어린이도서관',
     type: 'splib',
+    formUrl: 'https://www.splib.or.kr/spclib/menu/10243/program/30001/plusSearchSimple.do',
     searchUrl: 'https://www.splib.or.kr/spclib/menu/10243/program/30001/plusSearchResultList.do',
-    libraryCode: 'MA',
+    // 검색은 송파 전 도서관을 반환하므로, 결과의 도서관명으로 필터링한다.
+    matchName: '송파어린이도서관',
   },
   sp2lib: {
     name: '소나무언덕2호도서관',
     type: 'splib',
+    formUrl: 'https://www.splib.or.kr/sp2lib/menu/10488/program/30001/plusSearchSimple.do',
     searchUrl: 'https://www.splib.or.kr/sp2lib/menu/10488/program/30001/plusSearchResultList.do',
-    libraryCode: 'BB',
+    matchName: '소나무언덕2호',
   },
   bdllib: {
     name: '버들초등학교 도서관',
@@ -39,62 +42,58 @@ function stripTags(html) {
 function parseSearchResults(html) {
   const items = [];
 
-  // bookArea div 기준으로 분리 — li 직하위 여부 무관
+  // 각 검색결과 = <div class="bookArea"> ... </li> (한 도서관 소장본 1건)
   const blockRegex = /<div[^>]*class="[^"]*\bbookArea\b[^"]*"[^>]*>([\s\S]*?)<\/li>/g;
   let blockMatch;
 
   while ((blockMatch = blockRegex.exec(html)) !== null) {
     const block = blockMatch[1];
 
-    // 제목: span.title 또는 book_name 안의 a 태그
+    // 제목: <span class="title"> 안에 하이라이트 <span class="searchKwd">가 중첩됨.
+    // 따라서 닫는 </span></a> 까지 통째로 잡은 뒤 태그 제거.
     let titleRaw = '';
-    const titleSpan = block.match(/<span[^>]*class="[^"]*\btitle\b[^"]*"[^>]*>([\s\S]*?)<\/span>/);
-    if (titleSpan) {
-      titleRaw = stripTags(titleSpan[1]);
-    } else {
-      const bookNameA = block.match(/<[^>]*class="[^"]*book_name[^"]*"[^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/);
-      if (bookNameA) titleRaw = stripTags(bookNameA[1]);
+    let tm = block.match(/<span[^>]*class="[^"]*\btitle\b[^"]*"[^>]*>([\s\S]*?)<\/span>\s*<\/a>/);
+    if (!tm) {
+      // 폴백: book_name 안의 a 태그 전체
+      tm = block.match(/<[^>]*class="[^"]*book_name[^"]*"[^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/);
     }
+    if (tm) titleRaw = stripTags(tm[1]);
     if (!titleRaw) continue;
-    // 앞 번호 제거 (예: "1. 어린왕자" → "어린왕자")
-    const title = titleRaw.replace(/^\s*\d+\.\s*/, '').trim();
+    // "도서" 같은 분류 라벨과 앞 번호 제거 (예: "도서 1. 어린왕자" → "어린왕자")
+    const title = titleRaw.replace(/^\s*(?:도서|단행본|전자책)?\s*\d+\.\s*/, '').trim();
     if (!title) continue;
 
     const authorMatch = block.match(/<div[^>]*class="[^"]*book_info[^"]*info01[^"]*"[^>]*>([\s\S]*?)<\/div>/);
     const info2Match = block.match(/<div[^>]*class="[^"]*book_info[^"]*info02[^"]*"[^>]*>([\s\S]*?)<\/div>/);
     const info3Match = block.match(/<div[^>]*class="[^"]*book_info[^"]*info03[^"]*"[^>]*>([\s\S]*?)<\/div>/);
 
-    // 상태: class 유무 상관없이 strong 태그 내용 확인
+    // 상태: <span class="status"><strong class="okRent|noRentLoan">대출가능/불가</strong>
     const statusMatch = block.match(/<strong[^>]*>([\s\S]*?)<\/strong>/);
     const statusClassMatch = statusMatch ? statusMatch[0].match(/class="([^"]+)"/) : null;
     const statusText = statusMatch ? stripTags(statusMatch[1]) : '';
     const statusClass = statusClassMatch ? statusClassMatch[1] : '';
     const available = statusClass.includes('okRent') || statusText.includes('대출가능');
 
+    // info02: <span>출판사</span><span>연도</span><span>청구기호</span>
     const info2Spans = [];
     if (info2Match) {
       const spanRegex = /<span[^>]*>([\s\S]*?)<\/span>/g;
       let m;
       while ((m = spanRegex.exec(info2Match[1])) !== null) {
-        info2Spans.push(stripTags(m[1]));
+        const t = stripTags(m[1]);
+        if (t) info2Spans.push(t);
       }
     }
-    const info3Spans = [];
-    if (info3Match) {
-      const regex3 = /<span[^>]*>([\s\S]*?)<\/span>/g;
-      let m;
-      while ((m = regex3.exec(info3Match[1])) !== null) {
-        info3Spans.push(stripTags(m[1]));
-      }
-    }
+
+    // info03: 도서관명 + 소장위치 (직접 텍스트, span 아님)
+    const libraryName = info3Match ? stripTags(info3Match[1]) : '';
 
     items.push({
       title,
       author: authorMatch ? stripTags(authorMatch[1]) : '',
       publisher: info2Spans[0] || '',
-      callNo: info2Spans[2] || '',
-      libraryName: info3Spans[0] || '',
-      shelf: info3Spans[1] || '',
+      callNo: info2Spans.find((s) => /\d{2,3}[.\-]/.test(s)) || '',
+      libraryName,
       statusText,
       available,
     });
@@ -126,7 +125,8 @@ function findBestMatch(items, title, author, publisher) {
     // 제목 포함 (양방향)
     else if (normTitle && (itTitle.includes(normTitle) || normTitle.includes(itTitle))) score += 20;
 
-    if (score > bestScore) {
+    // 동점이면 대출가능 본을 우선 (한 권은 대출중, 다른 권은 대출가능인 경우 대비)
+    if (score > bestScore || (score === bestScore && item.available && best && !best.available)) {
       bestScore = score;
       best = item;
     }
@@ -136,76 +136,124 @@ function findBestMatch(items, title, author, publisher) {
   return { best, bestScore };
 }
 
+// set-cookie 헤더에서 JSESSIONID 추출 (Node undici: getSetCookie 우선)
+function extractSessionCookie(headers) {
+  let cookies = [];
+  if (typeof headers.getSetCookie === 'function') {
+    cookies = headers.getSetCookie();
+  }
+  if (!cookies.length) {
+    const raw = headers.get('set-cookie');
+    if (raw) cookies = [raw];
+  }
+  for (const c of cookies) {
+    const m = c.match(/JSESSIONID=[^;]+/i);
+    if (m) return m[0];
+  }
+  // 폴백: 첫 번째 쿠키
+  if (cookies.length) {
+    const m = cookies[0].match(/[A-Za-z0-9_.]+=[^;]+/);
+    if (m) return m[0];
+  }
+  return '';
+}
+
+const SPLIB_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+const SPLIB_PAGE_SIZE = 10; // 사이트가 페이지당 10개 고정 (pageUnit 무시됨)
+const SPLIB_MAX_PAGES = 5; // 최대 50건까지 탐색
+
+// 결과 페이지에서 "검색결과 총 N건" 추출
+function parseTotalCount(html) {
+  const m = html.match(/검색결과\s*총\s*<span[^>]*>\s*([\d,]+)/);
+  return m ? parseInt(m[1].replace(/,/g, ''), 10) : 0;
+}
+
+async function fetchSplibPage(lib, title, pageNo, cookie) {
+  const params = new URLSearchParams({
+    searchType: 'SIMPLE',
+    searchCategory: 'BOOK',
+    searchKey: 'ALL',
+    currentPageNo: String(pageNo),
+    searchKeyword: title,
+  });
+  const headers = {
+    'User-Agent': SPLIB_UA,
+    'Content-Type': 'application/x-www-form-urlencoded',
+    Origin: new URL(lib.searchUrl).origin,
+    Referer: lib.formUrl,
+    Accept: 'text/html,application/xhtml+xml,*/*;q=0.9',
+    'Accept-Language': 'ko-KR,ko;q=0.9',
+  };
+  if (cookie) headers['Cookie'] = cookie;
+
+  const response = await fetch(lib.searchUrl, { method: 'POST', headers, body: params.toString() });
+  const html = await response.text();
+  return { status: response.status, items: parseSearchResults(html), total: parseTotalCount(html) };
+}
+
 async function handleSplib(source, title, author, publisher, lib, res) {
   const queryStr = `${title} ${author || ''}`.trim();
-  const simpleUrl = lib.searchUrl.replace('plusSearchResultList.do', 'plusSearchSimple.do');
-  const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
-  // Step 1: GET 검색폼 → JSESSIONID 획득 (Python Playwright과 동일한 흐름)
+  // Step 1: 검색폼 GET → JSESSIONID 획득 (없으면 검색 POST가 400 반환)
   let sessionCookie = '';
   try {
-    const sessionRes = await fetch(simpleUrl, {
+    const sessionRes = await fetch(lib.formUrl, {
       method: 'GET',
-      headers: { 'User-Agent': UA, Accept: 'text/html', 'Accept-Language': 'ko-KR,ko;q=0.9' },
+      headers: { 'User-Agent': SPLIB_UA, Accept: 'text/html', 'Accept-Language': 'ko-KR,ko;q=0.9' },
       redirect: 'follow',
     });
-    const setCookie = sessionRes.headers.get('set-cookie') || '';
-    // JSESSIONID 우선, 없으면 첫 번째 쿠키 사용
-    const m = setCookie.match(/JSESSIONID=[^;]+/i) || setCookie.match(/[A-Za-z0-9_]+=\S[^;]*/);
-    if (m) sessionCookie = m[0];
-    console.log(`[splib ${source}] session GET status=${sessionRes.status} cookie="${sessionCookie}"`);
+    sessionCookie = extractSessionCookie(sessionRes.headers);
   } catch (e) {
     console.log(`[splib ${source}] session GET failed: ${e.message}`);
   }
 
-  // Step 2: POST 검색 (제목만, 저자는 매칭 스코어에서만 사용)
-  const params = new URLSearchParams({
-    searchType: 'SIMPLE',
-    searchCategory: 'BOOK',
-    searchKey: 'TITLE',
-    searchKeyword: title,
-    searchLibraryArr: lib.libraryCode,
-  });
+  // Step 2: 도서관 필터(searchLibraryArr)는 0건을 유발하므로 쓰지 않고,
+  // 송파 전 도서관 결과를 페이지별로 받아 도서관명으로 필터링한다.
+  // 대상 도서관 소장본은 뒤쪽 페이지에 있을 수 있으므로 페이지네이션 필수.
+  const libItems = [];
+  let total = 0;
+  let lastStatus = 0;
+  let pagesFetched = 0;
 
-  const reqHeaders = {
-    'User-Agent': UA,
-    'Content-Type': 'application/x-www-form-urlencoded',
-    Origin: new URL(lib.searchUrl).origin,
-    Referer: simpleUrl,
-    Accept: 'text/html,application/xhtml+xml,*/*;q=0.9',
-    'Accept-Language': 'ko-KR,ko;q=0.9',
-  };
-  if (sessionCookie) reqHeaders['Cookie'] = sessionCookie;
+  for (let page = 1; page <= SPLIB_MAX_PAGES; page++) {
+    const { status, items, total: t } = await fetchSplibPage(lib, title, page, sessionCookie);
+    lastStatus = status;
+    pagesFetched = page;
+    if (page === 1) total = t;
 
-  const response = await fetch(lib.searchUrl, {
-    method: 'POST',
-    headers: reqHeaders,
-    body: params.toString(),
-  });
+    for (const it of items) {
+      if (it.libraryName && it.libraryName.includes(lib.matchName)) libItems.push(it);
+    }
 
-  const html = await response.text();
-  const items = parseSearchResults(html);
-
-  // 디버그 로그 — vercel dev 콘솔에서 확인
-  console.log(`[splib ${source}] "${title}" → HTTP ${response.status}, htmlLen=${html.length}, items=${items.length}`);
-  if (items.length === 0) {
-    console.log(`[splib ${source}] HTML snippet: ${html.substring(0, 600)}`);
+    // 대상 도서관 소장본을 찾았으면 조기 종료
+    if (libItems.length > 0) break;
+    // 더 가져올 페이지가 없으면 종료
+    if (page * SPLIB_PAGE_SIZE >= total || items.length === 0) break;
   }
 
-  const { best, bestScore } = findBestMatch(items, title, author, publisher);
+  console.log(
+    `[splib ${source}] "${title}" → HTTP ${lastStatus}, total=${total}, ` +
+      `pages=${pagesFetched}, ${lib.matchName} 소장=${libItems.length}`,
+  );
+
+  const { best, bestScore } = findBestMatch(libItems, title, author, publisher);
+  // 제목이 최소한 포함(20점)되어야 유효 매칭으로 인정
+  const matched = best !== null && bestScore >= 20;
 
   return res.status(200).json({
     source,
     libraryName: lib.name,
     query: queryStr,
-    matched: best !== null && bestScore >= 0,
-    result: best,
+    matched,
+    result: matched ? best : null,
     _debug: {
-      items: items.length,
-      htmlLen: html.length,
-      status: response.status,
+      total,
+      pagesFetched,
+      libItems: libItems.length,
+      bestScore,
+      status: lastStatus,
       cookieSent: !!sessionCookie,
-      htmlHead: html.substring(0, 800),
     },
     checkedAt: Math.floor(Date.now() / 1000),
   });

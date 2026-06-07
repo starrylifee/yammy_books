@@ -44,20 +44,42 @@ function authErrorMessage(code) {
   return `로그인 오류: ${code}`;
 }
 
+// ── 조회 시각 포맷 (한국시간 기준 MM/DD HH:mm) ──
+function formatCheckedAt(checkedAt) {
+  if (!checkedAt) return '';
+  const d = new Date(checkedAt * 1000);
+  const parts = new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(d);
+  const get = (t) => parts.find((p) => p.type === t)?.value || '';
+  return `${get('month')}/${get('day')} ${get('hour')}:${get('minute')}`;
+}
+
+function checkedAtBadge(checkedAt) {
+  const t = formatCheckedAt(checkedAt);
+  return t ? `<div class="avail-time">🕒 ${t}</div>` : '';
+}
+
 // ── 도서관 가용성 뱃지 렌더링 ──
 function availabilitySummary(book, key) {
   const data = book.availability?.[key];
   if (!data) {
     return '<span class="status-pill muted">미조회</span>';
   }
+  const time = checkedAtBadge(data.checkedAt);
   if (data.error) {
     if (data.error === 'API_ENDPOINT_UNKNOWN') {
-      return '<span class="status-pill muted">API 확인필요</span>';
+      return `<span class="status-pill muted">API 확인필요</span>${time}`;
     }
-    return `<span class="status-pill no">오류</span><div class="avail-detail">${data.error}</div>`;
+    return `<span class="status-pill no">오류</span><div class="avail-detail">${data.error}</div>${time}`;
   }
   if (!data.matched || !data.result) {
-    return '<span class="status-pill no">미소장/불명</span>';
+    return `<span class="status-pill no">미소장/불명</span>${time}`;
   }
   const result = data.result;
   const cls = result.available ? 'ok' : 'no';
@@ -66,6 +88,7 @@ function availabilitySummary(book, key) {
     <span class="status-pill ${cls}">${statusText}</span>
     <div class="avail-detail">${result.libraryName || data.libraryName || ''}</div>
     <div class="avail-detail">${result.shelf || ''}</div>
+    ${time}
   `;
 }
 
@@ -316,6 +339,12 @@ function init() {
     await handleBatchCheck('spclib', $('#checkSpclibBtn'), '송파어린이도서관');
   });
 
+  // ── 소나무언덕2호도서관 일괄 조회 ──
+  $('#checkSp2libBtn').addEventListener('click', async () => {
+    if (!state.user) return;
+    await handleBatchCheck('sp2lib', $('#checkSp2libBtn'), '소나무언덕2호도서관');
+  });
+
   // ── 버들초 도서관 일괄 조회 ──
   $('#checkBdllibBtn').addEventListener('click', async () => {
     if (!state.user) return;
@@ -338,7 +367,7 @@ function init() {
       btn.innerHTML = '<span class="spinner"></span>';
 
       try {
-        const availability = await checkBook(book.title, book.author);
+        const availability = await checkBook(book.title, book.author, book.publisher);
         await updateAvailability(state.user.uid, bookId, availability);
         showToast(`"${book.title}" 조회 완료`, 'success');
       } catch (err) {
