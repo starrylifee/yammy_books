@@ -200,7 +200,13 @@ async function handleSplib(source, title, author, publisher, lib, res) {
     query: queryStr,
     matched: best !== null && bestScore >= 0,
     result: best,
-    _debug: { items: items.length, htmlLen: html.length },
+    _debug: {
+      items: items.length,
+      htmlLen: html.length,
+      status: response.status,
+      cookieSent: !!sessionCookie,
+      htmlHead: html.substring(0, 800),
+    },
     checkedAt: Math.floor(Date.now() / 1000),
   });
 }

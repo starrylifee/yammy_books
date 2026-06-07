@@ -20,10 +20,14 @@ async function checkSingleSource(title, author, publisher, source) {
     // 브라우저 콘솔 디버그 — 서버가 돌려준 파싱 결과 확인
     console.log(
       `[조회] ${source} "${title}" → matched=${data.matched} ` +
-        `items=${data._debug?.items ?? '?'} htmlLen=${data._debug?.htmlLen ?? '?'}` +
+        `items=${data._debug?.items ?? '?'} htmlLen=${data._debug?.htmlLen ?? '?'} ` +
+        `status=${data._debug?.status ?? '?'} cookie=${data._debug?.cookieSent ?? '?'}` +
         (data.error ? ` error=${data.error}` : ''),
       data,
     );
+    if (data._debug?.htmlHead) {
+      console.log(`[조회 HTML] ${source} "${title}":\n`, data._debug.htmlHead);
+    }
     return data;
   } catch (err) {
     console.error(`[조회 오류] ${source} "${title}":`, err.message);
