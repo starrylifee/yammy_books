@@ -629,6 +629,28 @@ input[type="file"]::file-selector-button {
   transform: none;
 }
 
+.btn-check-bdl {
+  background: linear-gradient(135deg, var(--color-primary-dim), #6d28d9);
+  color: #fff;
+  font-weight: 700;
+  padding: 10px 20px;
+  font-size: var(--font-sm);
+  box-shadow: 0 4px 16px rgba(124, 58, 237, 0.3);
+  width: 100%;
+  margin-top: 8px;
+}
+
+.btn-check-bdl:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 24px rgba(124, 58, 237, 0.45);
+}
+
+.btn-check-bdl:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
 /* ── Filters ── */
 .filters-bar {
   display: flex;

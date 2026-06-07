@@ -12,7 +12,6 @@ import {
   onSnapshot,
   serverTimestamp,
   writeBatch,
-  Timestamp,
 } from 'firebase/firestore';
 import { db } from './firebase-config.js';
 
@@ -149,11 +148,21 @@ export async function toggleRead(uid, bookId, currentIsRead) {
 }
 
 /**
- * 도서관 조회 결과 저장
+ * 도서관 조회 결과 저장 (전체 교체)
  */
 export async function updateAvailability(uid, bookId, availability) {
   return updateDoc(bookDoc(uid, bookId), {
     availability,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * 특정 도서관 하나의 조회 결과만 저장 (나머지 보존)
+ */
+export async function updateAvailabilitySource(uid, bookId, source, data) {
+  return updateDoc(bookDoc(uid, bookId), {
+    [`availability.${source}`]: data,
     updatedAt: serverTimestamp(),
   });
 }

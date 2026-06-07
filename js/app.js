@@ -7,42 +7,36 @@ import {
   importCSV,
   toggleRead,
   updateAvailability,
+  updateAvailabilitySource,
   updateBook,
   deleteBook,
   subscribeBooks,
 } from './books.js';
-import { checkBook, checkMultipleBooks } from './library-search.js';
+import { checkBook, checkBooksForSource } from './library-search.js';
 import YAMMY_BOOKS from './yammy-books-data.js';
 
-// ── DOM Helpers ──
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 
-// ── App State ──
 const state = {
   user: null,
   books: [],
   unsubBooks: null,
 };
 
-// ── Toast Notification ──
 function showToast(message, type = 'info') {
   const container = $('#toastContainer');
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
-
   const icons = { success: '✅', error: '❌', info: 'ℹ️', warning: '⚠️' };
   toast.innerHTML = `<span>${icons[type] || ''}</span><span>${message}</span>`;
-
   container.appendChild(toast);
-
   setTimeout(() => {
     toast.style.animation = 'toastOut 0.3s ease forwards';
     setTimeout(() => toast.remove(), 300);
   }, 3500);
 }
 
-// ── Google Auth Error → 한글 ──
 function authErrorMessage(code) {
   if (code === 'auth/popup-closed-by-user') return '로그인 창이 닫혔습니다.';
   if (code === 'auth/popup-blocked') return '팝업이 차단되었습니다. 팝업 허용 후 다시 시도하세요.';
@@ -50,13 +44,16 @@ function authErrorMessage(code) {
   return `로그인 오류: ${code}`;
 }
 
-// ── Availability Summary Rendering ──
+// ── 도서관 가용성 뱃지 렌더링 ──
 function availabilitySummary(book, key) {
   const data = book.availability?.[key];
   if (!data) {
     return '<span class="status-pill muted">미조회</span>';
   }
   if (data.error) {
+    if (data.error === 'API_ENDPOINT_UNKNOWN') {
+      return '<span class="status-pill muted">API 확인필요</span>';
+    }
     return `<span class="status-pill no">오류</span><div class="avail-detail">${data.error}</div>`;
   }
   if (!data.matched || !data.result) {
@@ -72,42 +69,18 @@ function availabilitySummary(book, key) {
   `;
 }
 
-// ── 독서로(버들초) 검색 링크 생성 ──
-// 독서로는 CSR SPA라서 서버 프록시 파싱 불가 → 직접 링크로 연결
-const DOKSERO_CONFIG = {
-  neisCode: 'B100005384',
-  provCode: 'B10',
-  schoolName: '서울버들초등학교',
-};
-
-function dokseroSearchUrl(title) {
-  const params = new URLSearchParams({
-    searchKeyword: title,
-    provCode: DOKSERO_CONFIG.provCode,
-    neisCode: DOKSERO_CONFIG.neisCode,
-    schoolName: DOKSERO_CONFIG.schoolName,
-  });
-  return `https://read365.edunet.net/PureScreen/SchoolSearchResult?${params.toString()}`;
-}
-
-function dokseroLink(book) {
-  const url = dokseroSearchUrl(book.title);
-  return `<a href="${url}" target="_blank" rel="noopener" class="btn-doksero">📖 독서로 검색</a>`;
-}
-
-// ── Filter Books ──
+// ── 필터 + 정렬 (읽은 책 → 하단) ──
 function filteredBooks() {
   const q = $('#searchInput').value.trim().toLowerCase();
   const f = $('#statusFilter').value;
+  const libKeys = ['spclib', 'sp2lib', 'bdllib'];
 
-  return state.books.filter((book) => {
+  const books = state.books.filter((book) => {
     const hay = `${book.title} ${book.author} ${book.publisher || ''}`.toLowerCase();
     if (q && !hay.includes(q)) return false;
 
-    const anyAvail = ['spclib', 'sp2lib'].some(
-      (k) => book.availability?.[k]?.result?.available
-    );
-    const anyChecked = ['spclib', 'sp2lib'].some((k) => book.availability?.[k]);
+    const anyAvail = libKeys.some((k) => book.availability?.[k]?.result?.available);
+    const anyChecked = libKeys.some((k) => book.availability?.[k]);
 
     if (f === 'read' && !book.isRead) return false;
     if (f === 'unread' && book.isRead) return false;
@@ -116,16 +89,23 @@ function filteredBooks() {
     if (f === 'unchecked' && anyChecked) return false;
     return true;
   });
+
+  // 읽은 책을 하단으로 (안 읽은 책 먼저)
+  books.sort((a, b) => {
+    if (a.isRead === b.isRead) return 0;
+    return a.isRead ? 1 : -1;
+  });
+
+  return books;
 }
 
-// ── Render Books Table ──
+// ── 책 목록 렌더링 ──
 function renderBooks() {
   const tbody = $('#booksTbody');
   tbody.innerHTML = '';
 
   const books = filteredBooks();
 
-  // Update count
   const countEl = $('#bookCount');
   countEl.innerHTML = `표시 <strong>${books.length}</strong> / 전체 <strong>${state.books.length}</strong>권`;
 
@@ -160,7 +140,7 @@ function renderBooks() {
       <td class="book-note">${escapeHtml(book.activityNote || '')}</td>
       <td>${availabilitySummary(book, 'spclib')}</td>
       <td>${availabilitySummary(book, 'sp2lib')}</td>
-      <td>${dokseroLink(book)}</td>
+      <td>${availabilitySummary(book, 'bdllib')}</td>
       <td>
         <div class="action-cell">
           <button class="btn-check" data-action="check" data-id="${book.id}">🔍 조회</button>
@@ -197,7 +177,6 @@ function renderAuthUI() {
 
   const displayName = state.user.displayName || '사용자';
   const email = state.user.email || '';
-
   const photoURL = state.user.photoURL || '';
   authBar.innerHTML = `
     <div class="top-user">
@@ -218,7 +197,6 @@ function renderAuthUI() {
   });
 }
 
-// ── Subscribe to Books (Firestore real-time) ──
 function startBookSubscription(uid) {
   if (state.unsubBooks) state.unsubBooks();
   state.unsubBooks = subscribeBooks(uid, (books) => {
@@ -227,10 +205,37 @@ function startBookSubscription(uid) {
   });
 }
 
-// ── Initialize App ──
-function init() {
+// ── 일괄 조회 공통 핸들러 ──
+async function handleBatchCheck(source, btnEl, label) {
+  const unreadBooks = state.books.filter((b) => !b.isRead);
 
-  // Auth state listener
+  if (!unreadBooks.length) {
+    showToast('안 읽은 책이 없습니다.', 'info');
+    return;
+  }
+
+  btnEl.disabled = true;
+  const originalText = btnEl.innerHTML;
+  btnEl.innerHTML = `<span class="spinner"></span> 조회 중... (0/${unreadBooks.length})`;
+
+  try {
+    let done = 0;
+    await checkBooksForSource(unreadBooks, source, async (bookId, src, result) => {
+      await updateAvailabilitySource(state.user.uid, bookId, src, result);
+      done++;
+      btnEl.innerHTML = `<span class="spinner"></span> 조회 중... (${done}/${unreadBooks.length})`;
+    });
+    showToast(`${label} ${unreadBooks.length}권 조회 완료!`, 'success');
+  } catch (err) {
+    showToast('일괄 조회 실패: ' + err.message, 'error');
+  } finally {
+    btnEl.disabled = false;
+    btnEl.innerHTML = originalText;
+  }
+}
+
+// ── Init ──
+function init() {
   onAuth((user) => {
     state.user = user;
     renderAuthUI();
@@ -247,7 +252,6 @@ function init() {
     }
   });
 
-  // ── Google 로그인 버튼 ──
   $('#googleLoginBtn').addEventListener('click', async () => {
     const errorEl = $('#googleLoginError');
     errorEl.textContent = '';
@@ -260,7 +264,6 @@ function init() {
     }
   });
 
-  // ── Add Book Form ──
   $('#bookForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!state.user) return;
@@ -288,7 +291,6 @@ function init() {
     }
   });
 
-  // ── CSV Upload ──
   $('#csvUploadBtn').addEventListener('click', async () => {
     if (!state.user) return;
 
@@ -300,7 +302,7 @@ function init() {
 
     try {
       const text = await file.text();
-      const count = await importCSV(state.user.uid, text);
+      const count = await Promise.resolve(importCSV(state.user.uid, text));
       showToast(`${count}권 업로드 완료! 📚`, 'success');
       $('#csvFile').value = '';
     } catch (err) {
@@ -308,39 +310,19 @@ function init() {
     }
   });
 
-  // ── Check Unread Books (Batch) ──
-  $('#checkUnreadBtn').addEventListener('click', async () => {
+  // ── 송파어린이도서관 일괄 조회 ──
+  $('#checkSpclibBtn').addEventListener('click', async () => {
     if (!state.user) return;
-
-    const btn = $('#checkUnreadBtn');
-    const unreadBooks = state.books.filter((b) => !b.isRead);
-
-    if (!unreadBooks.length) {
-      showToast('안 읽은 책이 없습니다.', 'info');
-      return;
-    }
-
-    btn.disabled = true;
-    const originalText = btn.textContent;
-    btn.innerHTML = `<span class="spinner"></span> 조회 중... (0/${unreadBooks.length})`;
-
-    try {
-      let done = 0;
-      await checkMultipleBooks(unreadBooks, async (bookId, availability) => {
-        await updateAvailability(state.user.uid, bookId, availability);
-        done++;
-        btn.innerHTML = `<span class="spinner"></span> 조회 중... (${done}/${unreadBooks.length})`;
-      });
-      showToast(`${unreadBooks.length}권 일괄 조회 완료!`, 'success');
-    } catch (err) {
-      showToast('일괄 조회 실패: ' + err.message, 'error');
-    } finally {
-      btn.disabled = false;
-      btn.textContent = originalText;
-    }
+    await handleBatchCheck('spclib', $('#checkSpclibBtn'), '송파어린이도서관');
   });
 
-  // ── Table Click Delegation ──
+  // ── 버들초 도서관 일괄 조회 ──
+  $('#checkBdllibBtn').addEventListener('click', async () => {
+    if (!state.user) return;
+    await handleBatchCheck('bdllib', $('#checkBdllibBtn'), '버들초 도서관');
+  });
+
+  // ── 테이블 클릭 위임 ──
   $('#booksTbody').addEventListener('click', async (e) => {
     const btn = e.target.closest('[data-action]');
     if (!btn || !state.user) return;
@@ -386,7 +368,7 @@ function init() {
     }
   });
 
-  // ── Table Checkbox Delegation (Toggle Read) ──
+  // ── 체크박스 읽음 토글 ──
   $('#booksTbody').addEventListener('change', async (e) => {
     const input = e.target.closest('[data-action="toggle"]');
     if (!input || !state.user) return;
@@ -402,15 +384,13 @@ function init() {
     }
   });
 
-  // ── Filters ──
   $('#searchInput').addEventListener('input', renderBooks);
   $('#statusFilter').addEventListener('change', renderBooks);
 
-  // ── Edit Modal ──
+  // ── 수정 모달 ──
   const editModal = $('#editModal');
   const editForm = $('#editBookForm');
 
-  // 모달 열기 (table delegation에서 호출)
   window._openEditModal = function (bookId) {
     const book = state.books.find((b) => b.id === bookId);
     if (!book) return;
@@ -423,7 +403,6 @@ function init() {
     editModal.classList.remove('hidden');
   };
 
-  // 모달 닫기
   $('#editCancelBtn').addEventListener('click', () => {
     editModal.classList.add('hidden');
   });
@@ -432,7 +411,6 @@ function init() {
     if (e.target === editModal) editModal.classList.add('hidden');
   });
 
-  // 저장
   editForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!state.user) return;
@@ -462,7 +440,6 @@ function init() {
 
   $$('.grade-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
-      // 선택 상태 토글
       $$('.grade-btn').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
 
@@ -473,7 +450,6 @@ function init() {
         return;
       }
 
-      // 미리보기 + 불러오기 버튼
       gradePreview.classList.remove('hidden');
       gradePreview.innerHTML = `
         <div class="preview-header">
@@ -522,5 +498,4 @@ function init() {
   });
 }
 
-// ── Boot ──
 init();

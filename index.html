@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Yammy Books — 독서 체크 + 도서관 대출 확인</title>
-  <meta name="description" content="읽은 책 체크, CSV 업로드, 송파어린이도서관·소나무언덕2호도서관·독서로(버들초) 대출 가능 확인. Yammy Books와 함께 독서 기록을 관리하세요." />
+  <meta name="description" content="버들초 야미독서 리스트가 근처 도서관(송파어린이도서관·버들초도서관)에 있는지 바로 확인하는 학생·학부모용 앱." />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>" />
   <link rel="stylesheet" href="/css/styles.css" />
 </head>
@@ -15,8 +15,8 @@
     <div class="card auth-card" style="animation-delay: 0.1s;">
       <div class="brand-large">📚</div>
       <h1>Yammy Books</h1>
-      <p class="auth-subtitle">읽은 책 체크 + 도서관 대출 가능 확인</p>
-      <p class="auth-desc">버들초 학생과 선생님만 사용할 수 있어요.</p>
+      <p class="auth-subtitle">야미독서 책이 근처 도서관에 있는지 바로 확인!</p>
+      <p class="auth-desc">버들초 학생과 학부모를 위한 앱이에요.</p>
 
       <button id="googleLoginBtn" class="btn-google">
         <svg width="20" height="20" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
@@ -97,9 +97,12 @@
           </div>
 
           <div style="margin-top: 18px;">
-            <h3>🔍 일괄 조회</h3>
-            <button id="checkUnreadBtn" type="button" class="btn-check-unread">
-              안 읽은 책만 대출 가능 확인
+            <h3>🔍 일괄 조회 (안 읽은 책)</h3>
+            <button id="checkSpclibBtn" type="button" class="btn-check-unread">
+              🏛️ 송파어린이도서관 일괄 조회
+            </button>
+            <button id="checkBdllibBtn" type="button" class="btn-check-bdl">
+              🏫 버들초 도서관 일괄 조회
             </button>
           </div>
         </div>
@@ -138,7 +141,7 @@
             <th>메모</th>
             <th>송파어린이</th>
             <th>소나무2호</th>
-            <th>독서로(버들초)</th>
+            <th>버들초도서관</th>
             <th>동작</th>
           </tr>
         </thead>
